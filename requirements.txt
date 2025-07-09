@@ -1,0 +1,6 @@
+streamlit
+python-binance
+pandas
+ta
+streamlit-autorefresh
+python-dotenv
