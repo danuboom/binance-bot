@@ -93,11 +93,11 @@ def determine_signal(rsi_value):
     else:
         return "HOLD (Neutral)"
 
-trade_log = []
+
+if 'trade_log' not in st.session_state:
+    st.session_state.trade_log = []
 
 def main():
-    global trade_log
-
     usdt_balance, btc_balance = get_balances()
     price = get_price()
     df = fetch_klines(symbol, interval)
@@ -121,7 +121,7 @@ def main():
             action_result = f"Initial BUY failed: {res['error']}"
         else:
             action_result = f"Initial BUY order placed: {btc_qty_to_buy} BTC"
-            trade_log.append(f"{datetime.now()} - Initial BUY {btc_qty_to_buy} BTC at ~{price}")
+            st.session_state.trade_log.append(f"{datetime.now()} - Initial BUY {btc_qty_to_buy} BTC at ~{price}")
     else:
         if signal.startswith("BUY") and btc_qty_to_buy >= min_qty:
             res = place_order("BUY", btc_qty_to_buy)
@@ -129,14 +129,14 @@ def main():
                 action_result = f"BUY order failed: {res['error']}"
             else:
                 action_result = f"BUY order placed: {btc_qty_to_buy} BTC"
-                trade_log.append(f"{datetime.now()} - BUY {btc_qty_to_buy} BTC at ~{price}")
+                st.session_state.trade_log.append(f"{datetime.now()} - BUY {btc_qty_to_buy} BTC at ~{price}")
         elif signal.startswith("SELL") and btc_qty_to_sell >= min_qty:
             res = place_order("SELL", btc_qty_to_sell)
             if "error" in res:
                 action_result = f"SELL order failed: {res['error']}"
             else:
                 action_result = f"SELL order placed: {btc_qty_to_sell} BTC"
-                trade_log.append(f"{datetime.now()} - SELL {btc_qty_to_sell} BTC at ~{price}")
+                st.session_state.trade_log.append(f"{datetime.now()} - SELL {btc_qty_to_sell} BTC at ~{price}")
 
     st.markdown(f"Starting fund")
     st.markdown(f"BTC/USDT: $108,000")
@@ -151,10 +151,10 @@ def main():
     st.markdown(f"### Action: {action_result}")
     st.line_chart(rsi_series)
 
-    if trade_log:
+    if st.session_state.trade_log:
         st.markdown("---")
         st.markdown("### Trade Log (Last 10 Trades):")
-        for entry in reversed(trade_log[-10:]):
+        for entry in reversed(st.session_state.trade_log[-10:]):
             st.code(entry)
 
 if __name__ == "__main__":
