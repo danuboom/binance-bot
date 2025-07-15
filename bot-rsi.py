@@ -23,6 +23,27 @@ trade_fraction = 0.05  # 5% per trade for mild risk
 
 st.title("🚀 Binance Testnet BTC/USDT RSI Bot (Mild Risk)")
 
+with st.expander("📘 Strategy Explanation"):
+    st.markdown("""
+### ⚙️ Strategy: RSI Cross with Mild Risk
+
+This bot trades based on **RSI (Relative Strength Index)** behavior on the **15-minute BTC/USDT chart**.
+
+#### 🔍 Trade Logic:
+- **Buy:** When RSI crosses **below 40** → Signals potential market rebound.
+- **Sell:** When RSI crosses **above 60** → Signals potential overbought condition.
+- Crossing detection reduces noise compared to using fixed RSI levels (like 30/70).
+
+#### 💼 Risk Management:
+- Trades only **5% of your balance** (BTC or USDT) per signal.
+- Helps preserve capital during sideways markets.
+
+#### 📊 Execution:
+- Evaluated once per minute.
+- Market orders placed instantly if signal and balance thresholds are met.
+    """)
+st.markdown("---")
+
 # Auto refresh every minute
 count = st_autorefresh(interval=60 * 1000, limit=None, key="refresh")
 
