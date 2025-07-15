@@ -21,7 +21,7 @@ interval = "15m"
 rsi_period = 14
 trade_fraction = 0.05  # 5% per trade for mild risk
 
-st.title("🚀 Binance Testnet BTC/USDT RSI Bot (Mild Risk)")
+st.title("🚀 Binance Testnet BTC/USDT RSI Bot (Mild Risk) 1.0")
 
 with st.expander("📘 Strategy Explanation"):
     st.markdown("""
@@ -42,7 +42,6 @@ This bot trades based on **RSI (Relative Strength Index)** behavior on the **15-
 - Evaluated once per minute.
 - Market orders placed instantly if signal and balance thresholds are met.
     """)
-st.markdown("---")
 
 # Auto refresh every minute
 count = st_autorefresh(interval=60 * 1000, limit=None, key="refresh")
@@ -131,7 +130,6 @@ def main():
     min_qty = 0.0001
 
     action_result = "No action taken"
-    qty = 0
 
     # Trade amount (5% of available balance)
     usdt_to_use = usdt_balance * trade_fraction
@@ -204,8 +202,13 @@ def main():
     history_df = pd.DataFrame(st.session_state.balance_history)
     history_df.set_index('time', inplace=True)
 
-    st.markdown("### Portfolio Value vs BTC/USDT Price Over Time")
-    st.line_chart(history_df[['portfolio_value', 'price']])
+    # Calculate percentage change from first value
+    df_pct = history_df.copy()
+    df_pct['portfolio_pct_change'] = (df_pct['portfolio_value'] / df_pct['portfolio_value'].iloc[0] - 1) * 100
+    df_pct['price_pct_change'] = (df_pct['price'] / df_pct['price'].iloc[0] - 1) * 100
+
+    st.markdown("### Portfolio and BTC Price % Change Since Start")
+    st.line_chart(df_pct[['portfolio_pct_change', 'price_pct_change']])
 
     st.markdown("---")
     st.markdown("### Trade Log (Last 10):")
