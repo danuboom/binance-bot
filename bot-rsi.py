@@ -147,9 +147,37 @@ def main():
     st.markdown(f"**USDT Balance:** {usdt_balance:,.4f}")
     st.markdown(f"**BTC Balance:** {btc_balance:,.6f}")
     st.markdown(f"**Current RSI ({rsi_period}):** {current_rsi:.2f}")
-    st.markdown(f"### Signal: {signal}")
-    st.markdown(f"### Action: {action_result}")
-    st.line_chart(rsi_series)
+    st.markdown(f"### Current Signal: {signal}")
+    if st.session_state.trade_log:
+        st.markdown(f"### Last Action: {st.session_state.trade_log[-1]}")
+    else:
+        st.markdown(f"### Last Action: None yet")
+    # st.line_chart(rsi_series)  # RSI graph commented out
+
+    # Track balances and price over time
+    if 'balance_history' not in st.session_state:
+        st.session_state.balance_history = []
+    st.session_state.balance_history.append({
+        'time': datetime.now(),
+        'usdt': usdt_balance,
+        'btc': btc_balance,
+        'price': price,
+        'portfolio_value': usdt_balance + btc_balance * price
+    })
+    
+    # Convert balance history to DataFrame for plotting
+    history_df = pd.DataFrame(st.session_state.balance_history)
+    history_df.set_index('time', inplace=True)
+
+    st.markdown("### Portfolio Value vs BTC/USDT Price")
+    st.markdown("""
+**Legend:**
+- **Portfolio Value**: Your total balance in USDT, calculated as `USDT balance + (BTC balance × BTC/USDT price)`.
+- **BTC/USDT Price**: The current price of Bitcoin in USDT.
+
+This chart helps you compare how your total portfolio value changes alongside the BTC/USDT price over time.
+    """)
+    st.line_chart(history_df[['portfolio_value', 'price']])
 
     if st.session_state.trade_log:
         st.markdown("---")
