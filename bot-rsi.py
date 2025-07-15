@@ -6,6 +6,7 @@ from ta.momentum import RSIIndicator
 import streamlit as st
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
+import math
 
 load_dotenv()
 
@@ -18,8 +19,11 @@ client.API_URL = 'https://testnet.binance.vision/api'
 symbol = "BTCUSDT"
 interval = "15m"
 rsi_period = 14
+trade_fraction = 0.05  # 5% per trade for mild risk
 
-st.title("🚀 Binance Testnet BTC/USDT RSI Bot with Dynamic Sizing")
+st.title("🚀 Binance Testnet BTC/USDT RSI Bot (Mild Risk)")
+
+# Auto refresh every minute
 count = st_autorefresh(interval=60 * 1000, limit=None, key="refresh")
 
 @st.cache_data(ttl=60)
@@ -35,8 +39,7 @@ def fetch_klines(symbol, interval, limit=100):
     return df
 
 def calculate_rsi(df, period):
-    rsi = RSIIndicator(df['close'], window=period).rsi()
-    return rsi
+    return RSIIndicator(df['close'], window=period).rsi()
 
 def get_balances():
     usdt = client.get_asset_balance('USDT')
@@ -49,141 +52,144 @@ def get_price():
     ticker = client.get_symbol_ticker(symbol=symbol)
     return float(ticker['price'])
 
-def round_step_size(quantity, step_size):
-    import math
-    precision = int(round(-math.log10(float(step_size))))
-    return round(quantity, precision)
-
-# Get step size from Binance
 @st.cache_resource
 def get_step_size(symbol):
     info = client.get_symbol_info(symbol)
     step = next(f for f in info['filters'] if f['filterType'] == 'LOT_SIZE')['stepSize']
     return step
 
+def round_step_size(quantity, step_size):
+    precision = int(round(-math.log10(float(step_size))))
+    return round(quantity, precision)
+
 def place_order(action, qty):
+    if qty <= 0:
+        return {"error": "Quantity must be positive"}
     try:
-        if qty <= 0:
-            return {"error": "Quantity must be positive"}
-        if action == "BUY":
-            order = client.create_order(
-                symbol=symbol,
-                side='BUY',
-                type='MARKET',
-                quantity=qty
-            )
-        elif action == "SELL":
-            order = client.create_order(
-                symbol=symbol,
-                side='SELL',
-                type='MARKET',
-                quantity=qty
-            )
-        else:
-            return {"error": "Invalid action"}
+        order = client.create_order(
+            symbol=symbol,
+            side=action,
+            type='MARKET',
+            quantity=qty
+        )
         return order
     except Exception as e:
         return {"error": str(e)}
 
-def determine_signal(rsi_value):
-    if rsi_value < 40:
-        return "BUY (Oversold)"
-    elif rsi_value > 60:
-        return "SELL (Overbought)"
-    else:
-        return "HOLD (Neutral)"
+def determine_signal(rsi_series):
+    # Use RSI crossing logic (mild risk)
+    prev_rsi = rsi_series.iloc[-2]
+    current_rsi = rsi_series.iloc[-1]
 
+    if prev_rsi >= 40 and current_rsi < 40:
+        return "BUY"
+    elif prev_rsi <= 60 and current_rsi > 60:
+        return "SELL"
+    else:
+        return "HOLD"
+
+def calculate_portfolio_value(usdt, btc, price):
+    return usdt + btc * price
 
 if 'trade_log' not in st.session_state:
     st.session_state.trade_log = []
+
+if 'initial_portfolio_value' not in st.session_state:
+    usdt_init, btc_init = get_balances()
+    price_init = get_price()
+    st.session_state.initial_portfolio_value = calculate_portfolio_value(usdt_init, btc_init, price_init)
 
 def main():
     usdt_balance, btc_balance = get_balances()
     price = get_price()
     df = fetch_klines(symbol, interval)
     rsi_series = calculate_rsi(df, rsi_period)
-    current_rsi = rsi_series.iloc[-1]
-    signal = determine_signal(current_rsi)
-    action_result = "No action taken"
+    signal = determine_signal(rsi_series)
 
     step_size = get_step_size(symbol)
+    min_qty = 0.0001
 
-    usdt_to_use = usdt_balance * 0.15
-    btc_to_use = btc_balance * 0.15
+    action_result = "No action taken"
+    qty = 0
+
+    # Trade amount (5% of available balance)
+    usdt_to_use = usdt_balance * trade_fraction
+    btc_to_use = btc_balance * trade_fraction
 
     btc_qty_to_buy = round_step_size(usdt_to_use / price, step_size)
     btc_qty_to_sell = round_step_size(btc_to_use, step_size)
-    min_qty = 0.0001
 
-    if btc_balance < min_qty and usdt_balance >= usdt_to_use and btc_qty_to_buy >= min_qty:
+    if signal == "BUY" and btc_qty_to_buy >= min_qty and usdt_to_use >= price * min_qty:
         res = place_order("BUY", btc_qty_to_buy)
         if "error" in res:
-            action_result = f"Initial BUY failed: {res['error']}"
+            action_result = f"BUY order failed: {res['error']}"
         else:
-            action_result = f"Initial BUY order placed: {btc_qty_to_buy} BTC"
-            st.session_state.trade_log.append(f"{datetime.now()} - Initial BUY {btc_qty_to_buy} BTC at ~{price}")
-    else:
-        if signal.startswith("BUY") and btc_qty_to_buy >= min_qty:
-            res = place_order("BUY", btc_qty_to_buy)
-            if "error" in res:
-                action_result = f"BUY order failed: {res['error']}"
-            else:
-                action_result = f"BUY order placed: {btc_qty_to_buy} BTC"
-                st.session_state.trade_log.append(f"{datetime.now()} - BUY {btc_qty_to_buy} BTC at ~{price}")
-        elif signal.startswith("SELL") and btc_qty_to_sell >= min_qty:
-            res = place_order("SELL", btc_qty_to_sell)
-            if "error" in res:
-                action_result = f"SELL order failed: {res['error']}"
-            else:
-                action_result = f"SELL order placed: {btc_qty_to_sell} BTC"
-                st.session_state.trade_log.append(f"{datetime.now()} - SELL {btc_qty_to_sell} BTC at ~{price}")
+            action_result = f"BUY order placed: {btc_qty_to_buy:.6f} BTC"
+        log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Signal: BUY | {action_result} | Price: {price:.2f}"
+        st.session_state.trade_log.append(log_entry)
 
-    st.markdown(f"Starting fund")
-    st.markdown(f"BTC/USDT: $108,000")
-    st.markdown(f"BTC: 1.00")
-    
-    st.markdown(f"Current balance")
+    elif signal == "SELL" and btc_qty_to_sell >= min_qty:
+        res = place_order("SELL", btc_qty_to_sell)
+        if "error" in res:
+            action_result = f"SELL order failed: {res['error']}"
+        else:
+            action_result = f"SELL order placed: {btc_qty_to_sell:.6f} BTC"
+        log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Signal: SELL | {action_result} | Price: {price:.2f}"
+        st.session_state.trade_log.append(log_entry)
+
+    else:
+        action_result = "No action taken"
+        log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Signal: HOLD | No action taken | Price: {price:.2f}"
+        st.session_state.trade_log.append(log_entry)
+
+    # Calculate ROI
+    current_portfolio_value = calculate_portfolio_value(usdt_balance, btc_balance, price)
+    roi = (current_portfolio_value - st.session_state.initial_portfolio_value) / st.session_state.initial_portfolio_value * 100
+
+    # Display info
+    st.markdown("## Current Portfolio Status")
     st.markdown(f"**BTC/USDT Price:** ${price:,.2f}")
     st.markdown(f"**USDT Balance:** {usdt_balance:,.4f}")
     st.markdown(f"**BTC Balance:** {btc_balance:,.6f}")
-    st.markdown(f"**Current RSI ({rsi_period}):** {current_rsi:.2f}")
-    st.markdown(f"### Current Signal: {signal}")
-    if st.session_state.trade_log:
-        st.markdown(f"### Last Action: {st.session_state.trade_log[-1]}")
-    else:
-        st.markdown(f"### Last Action: None yet")
-    # st.line_chart(rsi_series)  # RSI graph commented out
+    st.markdown(f"**Current RSI ({rsi_period}):** {rsi_series.iloc[-1]:.2f}")
+    st.markdown(f"**ROI:** {roi:.2f}%")
 
-    # Track balances and price over time
+    col1, col2 = st.columns(2)
+    if signal == "BUY":
+        col1.success(f"Signal: BUY (RSI crossed below 40)")
+    elif signal == "SELL":
+        col1.error(f"Signal: SELL (RSI crossed above 60)")
+    else:
+        col1.info("Signal: HOLD")
+
+    if st.session_state.trade_log:
+        last_action = st.session_state.trade_log[-1]
+        if "BUY" in last_action:
+            col2.success(f"Last Action: {last_action}")
+        elif "SELL" in last_action:
+            col2.error(f"Last Action: {last_action}")
+        else:
+            col2.info(f"Last Action: {last_action}")
+
+    # Keep track of portfolio value over time for chart
     if 'balance_history' not in st.session_state:
         st.session_state.balance_history = []
     st.session_state.balance_history.append({
         'time': datetime.now(),
-        'usdt': usdt_balance,
-        'btc': btc_balance,
-        'price': price,
-        'portfolio_value': usdt_balance + btc_balance * price
+        'portfolio_value': current_portfolio_value,
+        'price': price
     })
-    
-    # Convert balance history to DataFrame for plotting
+
     history_df = pd.DataFrame(st.session_state.balance_history)
     history_df.set_index('time', inplace=True)
 
-    st.markdown("### Portfolio Value vs BTC/USDT Price")
-    st.markdown("""
-**Legend:**
-- **Portfolio Value**: Your total balance in USDT, calculated as `USDT balance + (BTC balance × BTC/USDT price)`.
-- **BTC/USDT Price**: The current price of Bitcoin in USDT.
-
-This chart helps you compare how your total portfolio value changes alongside the BTC/USDT price over time.
-    """)
+    st.markdown("### Portfolio Value vs BTC/USDT Price Over Time")
     st.line_chart(history_df[['portfolio_value', 'price']])
 
-    if st.session_state.trade_log:
-        st.markdown("---")
-        st.markdown("### Trade Log (Last 10 Trades):")
-        for entry in reversed(st.session_state.trade_log[-10:]):
-            st.code(entry)
+    st.markdown("---")
+    st.markdown("### Trade Log (Last 10):")
+    for entry in reversed(st.session_state.trade_log[-10:]):
+        st.code(entry)
 
 if __name__ == "__main__":
     main()
