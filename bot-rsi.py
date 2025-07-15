@@ -20,7 +20,6 @@ interval = "15m"
 rsi_period = 14
 
 st.title("🚀 Binance Testnet BTC/USDT RSI Bot with Dynamic Sizing")
-
 count = st_autorefresh(interval=60 * 1000, limit=None, key="refresh")
 
 @st.cache_data(ttl=60)
@@ -49,6 +48,18 @@ def get_balances():
 def get_price():
     ticker = client.get_symbol_ticker(symbol=symbol)
     return float(ticker['price'])
+
+def round_step_size(quantity, step_size):
+    import math
+    precision = int(round(-math.log10(float(step_size))))
+    return round(quantity, precision)
+
+# Get step size from Binance
+@st.cache_resource
+def get_step_size(symbol):
+    info = client.get_symbol_info(symbol)
+    step = next(f for f in info['filters'] if f['filterType'] == 'LOT_SIZE')['stepSize']
+    return step
 
 def place_order(action, qty):
     try:
@@ -92,45 +103,46 @@ def main():
     df = fetch_klines(symbol, interval)
     rsi_series = calculate_rsi(df, rsi_period)
     current_rsi = rsi_series.iloc[-1]
-
     signal = determine_signal(current_rsi)
     action_result = "No action taken"
 
-    # Calculate 15% of balances
+    step_size = get_step_size(symbol)
+
     usdt_to_use = usdt_balance * 0.15
     btc_to_use = btc_balance * 0.15
 
-    # Convert USDT amount to BTC quantity (floor to 6 decimals)
-    btc_qty_to_buy = float(f"{usdt_to_use / price:.6f}")
-    btc_qty_to_sell = float(f"{btc_to_use:.6f}")
-
-    # Minimum trade amount safeguard (Binance min ~0.0001 BTC or adjust)
+    btc_qty_to_buy = round_step_size(usdt_to_use / price, step_size)
+    btc_qty_to_sell = round_step_size(btc_to_use, step_size)
     min_qty = 0.0001
 
     if btc_balance < min_qty and usdt_balance >= usdt_to_use and btc_qty_to_buy >= min_qty:
-        # Initial buy if no BTC at all
         res = place_order("BUY", btc_qty_to_buy)
         if "error" in res:
             action_result = f"Initial BUY failed: {res['error']}"
         else:
-            action_result = f"Initial BUY order placed: {btc_qty_to_buy} BTC at market"
-            trade_log.append(f"{datetime.now()} Initial BUY {btc_qty_to_buy} BTC at ~{price}")
+            action_result = f"Initial BUY order placed: {btc_qty_to_buy} BTC"
+            trade_log.append(f"{datetime.now()} - Initial BUY {btc_qty_to_buy} BTC at ~{price}")
     else:
         if signal.startswith("BUY") and btc_qty_to_buy >= min_qty:
             res = place_order("BUY", btc_qty_to_buy)
             if "error" in res:
                 action_result = f"BUY order failed: {res['error']}"
             else:
-                action_result = f"BUY order placed: {btc_qty_to_buy} BTC at market"
-                trade_log.append(f"{datetime.now()} BUY {btc_qty_to_buy} BTC at ~{price}")
+                action_result = f"BUY order placed: {btc_qty_to_buy} BTC"
+                trade_log.append(f"{datetime.now()} - BUY {btc_qty_to_buy} BTC at ~{price}")
         elif signal.startswith("SELL") and btc_qty_to_sell >= min_qty:
             res = place_order("SELL", btc_qty_to_sell)
             if "error" in res:
                 action_result = f"SELL order failed: {res['error']}"
             else:
-                action_result = f"SELL order placed: {btc_qty_to_sell} BTC at market"
-                trade_log.append(f"{datetime.now()} SELL {btc_qty_to_sell} BTC at ~{price}")
+                action_result = f"SELL order placed: {btc_qty_to_sell} BTC"
+                trade_log.append(f"{datetime.now()} - SELL {btc_qty_to_sell} BTC at ~{price}")
 
+    st.markdown(f"Starting fund")
+    st.markdown(f"BTC/USDT: $108,000")
+    st.markdown(f"BTC: 1.00")
+    
+    st.markdown(f"Current balance")
     st.markdown(f"**BTC/USDT Price:** ${price:,.2f}")
     st.markdown(f"**USDT Balance:** {usdt_balance:,.4f}")
     st.markdown(f"**BTC Balance:** {btc_balance:,.6f}")
@@ -141,9 +153,9 @@ def main():
 
     if trade_log:
         st.markdown("---")
-        st.markdown("### Trade Log:")
+        st.markdown("### Trade Log (Last 10 Trades):")
         for entry in reversed(trade_log[-10:]):
-            st.markdown(entry)
+            st.code(entry)
 
 if __name__ == "__main__":
     main()
